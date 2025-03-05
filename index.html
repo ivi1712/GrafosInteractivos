@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grafo Interactivo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="text/javascript" src="https://unpkg.com/vis-network@latest/dist/vis-network.min.js"></script>
+    <style>
+        #network {
+            width: 90%;
+            height: 600px;
+            border: 1px solid black;
+        }
+        button {
+            margin: 5px;
+            padding: 8px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center p-6">
+
+    <h2 class="text-3xl font-bold mb-4">Grafos online</h2>
+    <div class="flex gap-4 mb-4">
+        <button onclick="agregarNodo()" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"> Agregar Nodo</button>
+        <button onclick="agregarArista()" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Agregar Arista</button>
+        <button onclick="eliminarSeleccionado()" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Eliminar Seleccionado</button>
+        <button onclick="mostrarControlesVis()" class="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">
+    Controles Grafo
+</button>
+    </div>
+    
+    <p id="resultado" class="text-lg font-semibold mb-4"></p>
+    <p id="cconexa"></p>
+    <p id="alert"></p>
+    <div id="network"  class="w-[600px] h-[400px] bg-gray-800 border border-gray-700 rounded-lg shadow-lg"></div>
+
+    <script>
+        let nodes = new vis.DataSet([]);
+        let edges = new vis.DataSet([]);
+        let container = document.getElementById("network");
+        let data = { nodes: nodes, edges: edges };
+        let options = { interaction: { multiselect: true } };
+        let network = new vis.Network(container, data, options);
+        let contadorNodos = 1;
+
+        // Función para agregar un nodo que aparezca en la siguiente posición
+        function agregarNodo() {
+            let nodosActuales = nodes.get();
+    
+            // Definir posición por defecto (centro si es el primer nodo)
+            let posX = 0, posY = 0;
+
+            if (nodosActuales.length > 0) {
+                // Obtener el último nodo agregado
+                let ultimoNodo = nodosActuales[nodosActuales.length - 1];
+
+                // Calcular una posición cercana (desplazamiento aleatorio pequeño)
+                posX = ultimoNodo.x + (Math.random() * 50 - 25);
+                posY = ultimoNodo.y + (Math.random() * 50 - 25);
+            }
+
+            nodes.add({ id: contadorNodos, label: contadorNodos.toString() });
+            network.stabilize();
+            contadorNodos++;
+            verificarEuleriano();
+        }
+
+        // Función para agregar una arista evitando multigrafos
+        function agregarArista() {
+            let seleccionados = network.getSelectedNodes();
+            if (seleccionados.length === 2) {
+                let from = seleccionados[0];
+                let to = seleccionados[1];
+
+                // Verificar si ya existe una arista entre estos nodos
+                let existe = edges.get().some(edge => 
+                    (edge.from === from && edge.to === to) || 
+                    (edge.from === to && edge.to === from)
+                );
+
+                if (existe) {
+                    document.getElementById("alert").innerHTML = "❌ Ya existe una arista entre estos nodos.";
+                } else {
+                    document.getElementById("alert").innerHTML = "";
+                    edges.add({ from, to });
+                    verificarEuleriano();
+                }
+            } else {
+                document.getElementById("alert").innerHTML = "⚠️ Selecciona exactamente 2 nodos para conectar.";
+            }
+        }
+
+        // Función para eliminar un nodo o arista seleccionado
+        function eliminarSeleccionado() {
+            let nodosSeleccionados = network.getSelectedNodes();
+            let aristasSeleccionadas = network.getSelectedEdges();
+
+            nodosSeleccionados.forEach(id => nodes.remove(id));
+            aristasSeleccionadas.forEach(id => edges.remove(id));
+            verificarEuleriano();
+        }
+
+        // Función para verificar si el grafo es Euleriano
+        function verificarEuleriano() {
+            let grados = new Map();
+            nodes.get().forEach(node => grados.set(node.id, 0));
+
+            edges.get().forEach(edge => {
+                grados.set(edge.from, grados.get(edge.from) + 1);
+                grados.set(edge.to, grados.get(edge.to) + 1);
+            });
+
+            let impares = 0;
+            grados.forEach(grado => { if (grado % 2 !== 0) impares++; });
+            componentesConexas = encontrarComponentesConexas(nodes.get(), edges.get());
+
+            let mensaje = "El grafo ";
+
+            // No puede ser un grafo euleriano si no es conexo y/o si tiene mas de una componente conexa
+            if (componentesConexas.length > 1) mensaje += "NO es conexo.";
+            else if (impares === 0) mensaje += "tiene un circuito euleriano, es decir es un grafo euleriano.";
+            else if (impares === 2) mensaje += "tiene un camino euleriano, es decir es un grafo semieuleriano.";
+            else mensaje += "**NO es euleriano**.";
+
+            document.getElementById("resultado").innerHTML = mensaje;
+            document.getElementById("cconexa").innerHTML = "Componentes Conexas: " + encontrarComponentesConexas(nodes.get(), edges.get()).length;
+
+            // Verificar si es hamiltoniano
+            if (esHamiltoniano(nodes.get(), edges.get())) {
+                document.getElementById("resultado").innerHTML += "El grafo es hamiltoniano.";
+            } else {
+                document.getElementById("resultado").innerHTML += "El grafo NO es hamiltoniano.";
+            }
+        }
+
+        function encontrarComponentesConexas(nodes, edges) {
+            let visitados = new Set();
+            let componentes = [];
+        
+            // Crear un mapa de adyacencia
+            let grafo = new Map();
+            nodes.forEach(node => grafo.set(node.id, []));
+            edges.forEach(edge => {
+                grafo.get(edge.from).push(edge.to);
+                grafo.get(edge.to).push(edge.from);
+            });
+        
+            // Función BFS para recorrer cada componente
+            function bfs(nodoInicial) {
+                let cola = [nodoInicial];
+                let componente = [];
+                visitados.add(nodoInicial);
+        
+                while (cola.length > 0) {
+                    let nodo = cola.shift();
+                    componente.push(nodo);
+        
+                    for (let vecino of grafo.get(nodo)) {
+                        if (!visitados.has(vecino)) {
+                            visitados.add(vecino);
+                            cola.push(vecino);
+                        }
+                    }
+                }
+        
+                return componente;
+            }
+        
+            // Recorrer todos los nodos y encontrar las componentes conexas
+            nodes.forEach(node => {
+                if (!visitados.has(node.id)) {
+                    let nuevaComponente = bfs(node.id);
+                    componentes.push(nuevaComponente);
+                }
+            });
+        
+            return componentes;
+        }
+        
+        // Funcion para verificar si el grafo es hamiltoniano
+        function esHamiltoniano(nodes, edges) {
+            let n = nodes.length;
+            if (n === 0) return false;
+        
+            // Crear un mapa de adyacencia
+            let grafo = new Map();
+            nodes.forEach(node => grafo.set(node.id, []));
+            edges.forEach(edge => {
+                grafo.get(edge.from).push(edge.to);
+                grafo.get(edge.to).push(edge.from);
+            });
+        
+            let path = [];
+            let visitados = new Set();
+        
+            function backtrack(nodo) {
+                if (path.length === n) {
+                    // Verificamos si existe una arista que cierre el ciclo (al nodo inicial)
+                    return grafo.get(nodo).includes(path[0]);
+                }
+        
+                for (let vecino of grafo.get(nodo)) {
+                    if (!visitados.has(vecino)) {
+                        path.push(vecino);
+                        visitados.add(vecino);
+        
+                        if (backtrack(vecino)) return true;
+        
+                        // Retroceso (Backtracking)
+                        path.pop();
+                        visitados.delete(vecino);
+                    }
+                }
+                return false;
+            }
+        
+            // Probar desde cada nodo como inicio
+            for (let startNode of nodes) {
+                path = [startNode.id];
+                visitados = new Set([startNode.id]);
+        
+                if (backtrack(startNode.id)) return true;
+            }
+        
+            return false;
+        }
+        
+
+        // Evento para actualizar la comprobación cuando se modifique el grafo
+        network.on("afterDrawing", verificarEuleriano);
+    </script>
+    <button onclick="mostrarCreditos()" 
+    class="mt-4 bg-purple-600 hover:bg-purple-800 text-white font-bold py-2 px-4 rounded">
+    Créditos
+</button>
+
+
+<script>
+function mostrarCreditos() {
+    alert("📌 Proyecto creado por Iván González Gordo ivagon09@ucm.es \n📅 Año: 2024 \n🔗 Basado en Vis.js y Tailwind CSS");
+}
+function mostrarControlesVis() {
+    alert("📌 Puedes mover los nodos arrastrándolos \n📌 Puedes seleccionar varios nodos con Ctrl + Click \n📌 Puedes mover el grafo arrastrando el fondo");
+}
+</script>
+</body>
+</html>
